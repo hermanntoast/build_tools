@@ -415,8 +415,16 @@ def set_cwd(dir):
 def git_update(repo, is_no_errors=False, is_current_dir=False):
   print("[git] update: " + repo)
   url = "https://github.com/ONLYOFFICE/" + repo + ".git"
+  ####### EDITED BY hermanntoast <dev@hermann-toast.de> ######
+  if repo == "server" or repo == "web-apps":
+    url = "https://github.com/hermanntoast/" + repo + ".git"
+  ############################################################
   if config.option("git-protocol") == "ssh":
     url = "git@github.com:ONLYOFFICE/" + repo + ".git"
+    ####### EDITED BY hermanntoast <dev@hermann-toast.de> ######
+    if repo == "server" or repo == "web-apps":
+      url = "git@github.com:hermanntoast/" + repo + ".git"
+    ############################################################
   folder = get_script_dir() + "/../../" + repo
   if is_current_dir:
     folder = repo
