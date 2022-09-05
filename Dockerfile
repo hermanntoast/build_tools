@@ -18,4 +18,4 @@ RUN cd /build_tools/tools/linux && \
 FROM onlyoffice/documentserver:${product_version}
 
 COPY --from=build-stage /build_tools/out/linux_64/onlyoffice  /var/www/onlyoffice
-COPY ../buildfiles/certs /etc/ssl/webserver
+COPY ./buildfiles/certs /etc/ssl/webserver
