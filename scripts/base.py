@@ -12,6 +12,9 @@ import config
 import codecs
 import re
 import stat
+import json
+
+__file__script__path__ = os.path.dirname( os.path.realpath(__file__))
 
 # common functions --------------------------------------
 def get_script_dir(file=""):
@@ -175,37 +178,87 @@ def create_dir(path):
     os.makedirs(path2)
   return
 
+def move_dir(src, dst):
+  if is_dir(dst):
+    delete_dir(dst)
+  if is_dir(src):
+    copy_dir(src, dst)
+    delete_dir(src)
+  return
+
 def copy_dir(src, dst):
   if is_dir(dst):
     delete_dir(dst)
   try:
-    shutil.copytree(get_path(src), get_path(dst))    
-  except OSError as e:
+    shutil.copytree(get_path(src), get_path(dst))
+  except:
+    if ("windows" == host_platform()) and copy_dir_windows(src, dst):
+      return
     print('Directory not copied. Error: %s' % e)
   return
 
+def copy_dir_windows(src, dst):
+  if is_dir(dst):
+    delete_dir(dst)
+  err = cmd("robocopy", [get_path(src), get_path(dst), "/e", "/NFL", "/NDL", "/NJH", "/NJS", "/nc", "/ns", "/np"], True)
+  if (1 == err):
+    return True
+  return False
+
 def delete_dir_with_access_error(path):
   def delete_file_on_error(func, path, exc_info):
-    if not os.access(path, os.W_OK):
-      os.chmod(path, stat.S_IWUSR)
-      func(path)
+    if ("windows" != host_platform()):
+      if not os.access(path, os.W_OK):
+        os.chmod(path, stat.S_IWUSR)
+        func(path)
+      return
+    elif (0 != path.find("\\\\?\\")):
+      # abspath not work with long names
+      full_path = path
+      drive_pos = full_path.find(":")
+      if (drive_pos < 0) or (drive_pos > 2):
+        full_path = os.getcwd() + "\\" + full_path
+      else:
+        full_path = full_path
+      if (len(full_path) >= 260):
+        full_path = "\\\\?\\" + full_path
+      if not os.access(full_path, os.W_OK):
+        os.chmod(full_path, stat.S_IWUSR)
+      func(full_path)
     return
   if not is_dir(path):
     print("delete warning [folder not exist]: " + path)
     return
-  shutil.rmtree(get_path(path), ignore_errors=False, onerror=delete_file_on_error)
+  shutil.rmtree(os.path.normpath(get_path(path)), ignore_errors=False, onerror=delete_file_on_error)
   return
 
 def delete_dir(path):
   if not is_dir(path):
     print("delete warning [folder not exist]: " + path)
     return
-  shutil.rmtree(get_path(path), ignore_errors=True)
+  if ("windows" == host_platform()):
+    delete_dir_with_access_error(path)
+  else:
+    shutil.rmtree(get_path(path), ignore_errors=True)
   return
 
 def copy_lib(src, dst, name):
   if (config.check_option("config", "bundle_dylibs")) and is_dir(src + "/" + name + ".framework"):
     copy_dir(src + "/" + name + ".framework", dst + "/" + name + ".framework")
+
+    if (config.check_option("config", "bundle_xcframeworks")) and is_dir(src + "/simulator/" + name + ".framework"):
+        create_dir(dst + "/simulator")
+        copy_dir(src + "/simulator/" + name + ".framework", dst + "/simulator/" + name + ".framework")
+
+        cmd("xcodebuild", ["-create-xcframework", 
+            "-framework", dst + "/" + name + ".framework", 
+            "-framework", dst + "/simulator/" + name + ".framework", 
+            "-output", dst + "/" + name + ".xcframework"])
+
+        delete_dir(dst + "/" + name + ".framework")
+        delete_dir(dst + "/simulator/" + name + ".framework")
+        delete_dir(dst + "/simulator")
+
     return
 
   lib_ext = ".so"
@@ -240,6 +293,9 @@ def copy_exe(src, dst, name):
   return
 
 def replaceInFile(path, text, textReplace):
+  if not is_file(path):
+    print("[replaceInFile] file not exist: " + path)
+    return
   filedata = ""
   with open(get_path(path), "r") as file:
     filedata = file.read()
@@ -248,7 +304,22 @@ def replaceInFile(path, text, textReplace):
   with open(get_path(path), "w") as file:
     file.write(filedata)
   return
+def replaceInFileUtf8(path, text, textReplace):
+  if not is_file(path):
+    print("[replaceInFile] file not exist: " + path)
+    return
+  filedata = ""
+  with open(get_path(path), "rb") as file:
+    filedata = file.read().decode("UTF-8")
+  filedata = filedata.replace(text, textReplace)
+  delete_file(path)
+  with open(get_path(path), "wb") as file:
+    file.write(filedata.encode("UTF-8"))
+  return
 def replaceInFileRE(path, pattern, textReplace):
+  if not is_file(path):
+    print("[replaceInFile] file not exist: " + path)
+    return
   filedata = ""
   with open(get_path(path), "r") as file:
     filedata = file.read()
@@ -412,18 +483,23 @@ def set_cwd(dir):
   return
 
 # git ---------------------------------------------------
-def git_update(repo, is_no_errors=False, is_current_dir=False):
+def git_update(repo, is_no_errors=False, is_current_dir=False, git_owner=""):
   print("[git] update: " + repo)
-  url = "https://github.com/ONLYOFFICE/" + repo + ".git"
-  ####### EDITED BY hermanntoast <dev@hermann-toast.de> ######
-  if repo == "server" or repo == "web-apps":
-    url = "https://github.com/hermanntoast/" + repo + ".git"
+  owner = git_owner if git_owner else "ONLYOFFICE"
+  url = "https://github.com/" + owner + "/" + repo + ".git"
+  ####### EDITED BY netzint <lukas.spitznagel@netzint.de> ######
+  if repo == "server":
+    url = "https://github.com/netzint/onlyoffice-" + repo + ".git"
+  elif repo == "web-apps":
+    url = "https://github.com/netzint/onlyoffice-" + repo + ".git"
   ############################################################
   if config.option("git-protocol") == "ssh":
     url = "git@github.com:ONLYOFFICE/" + repo + ".git"
-    ####### EDITED BY hermanntoast <dev@hermann-toast.de> ######
-    if repo == "server" or repo == "web-apps":
-      url = "git@github.com:hermanntoast/" + repo + ".git"
+    ####### EDITED BY netzint <lukas.spitznagel@netzint.de> ######
+    if repo == "server":
+      url = "git@github.com:netzint/onlyoffice-" + repo + ".git"
+    elif repo == "web-apps":
+      url = "git@github.com:netzint/onlyoffice-" + repo + ".git"
     ############################################################
   folder = get_script_dir() + "/../../" + repo
   if is_current_dir:
@@ -455,14 +531,14 @@ def get_repositories():
   result["core"] = [False, False]
   result["sdkjs"] = [False, False]
   result.update(get_sdkjs_addons())
-  result.update(get_sdkjs_plugins())
-  result.update(get_sdkjs_plugins_server())
+  result["onlyoffice.github.io"] = [False, False]
   result["web-apps"] = [False, False]
   result.update(get_web_apps_addons())
   result["dictionaries"] = [False, False]
+  result["core-fonts"] = [False, False]
 
   if config.check_option("module", "builder"):
-    result["DocumentBuilder"] = [False, False]
+    result["document-templates"] = [False, False]
 
   if config.check_option("module", "desktop"):
     result["desktop-sdk"] = [False, False]
@@ -474,9 +550,6 @@ def get_repositories():
     result.update(get_server_addons())
     result["document-server-integration"] = [False, False]
     result["document-templates"] = [False, False]
-    
-  if (config.check_option("module", "server") or config.check_option("platform", "ios")):
-    result["core-fonts"] = [False, False]
 
   get_branding_repositories(result)
   return result
@@ -555,10 +628,38 @@ def get_prefix_cross_compiler_arm64():
     return "aarch64-unknown-linux-gnu-"
   return ""
 
+def get_gcc_version():
+  gcc_version_major = 4
+  gcc_version_minor = 0
+  gcc_version_str = run_command("gcc -dumpfullversion -dumpversion")['stdout']
+  if (gcc_version_str != ""):
+    try:
+      gcc_ver = gcc_version_str.split(".")
+      gcc_version_major = int(gcc_ver[0])
+      gcc_version_minor = int(gcc_ver[1])
+    except Exception as e:
+      gcc_version_major = 4
+      gcc_version_minor = 0
+  return gcc_version_major * 1000 + gcc_version_minor
+
 # qmake -------------------------------------------------
 def qt_setup(platform):
   compiler = config.check_compiler(platform)
   qt_dir = config.option("qt-dir") if (-1 == platform.find("_xp")) else config.option("qt-dir-xp")
+
+  # qt bug
+  if (host_platform() == "mac"):
+    for compiler_folder in glob.glob(qt_dir + "/*"):
+      if is_dir(compiler_folder):
+        old_path_file = compiler_folder + "/mkspecs/features/toolchain.prf"
+        new_path_file = compiler_folder + "/mkspecs/features/toolchain.prf.bak"
+        if (is_file(old_path_file) and not is_file(new_path_file)):
+          try:
+            copy_file(old_path_file, new_path_file)
+            copy_file(get_script_dir() + "/../tools/mac/toolchain.prf", old_path_file)
+          except IOError as e:
+            print("Unable to copy file: " + old_path_file)
+
   compiler_platform = compiler["compiler"] if platform_is_32(platform) else compiler["compiler_64"]
   qt_dir = qt_dir + "/" + compiler_platform
 
@@ -583,6 +684,37 @@ def qt_version():
   qt_dir = qt_dir.split("/")[-3]
   return "".join(i for i in qt_dir if (i.isdigit() or i == "."))
 
+def check_congig_option_with_platfom(platform, option_name):
+  if config.check_option("config", option_name):
+    return True
+  if (0 == platform.find("win")) and config.check_option("config_addon_windows", option_name):
+    return True
+  elif (0 == platform.find("linux")) and config.check_option("config_addon_linux", option_name):
+    return True
+  elif (0 == platform.find("mac")) and config.check_option("config_addon_macos", option_name):
+    return True
+  elif (0 == platform.find("ios")) and config.check_option("config_addon_ios", option_name):
+    return True
+  elif (0 == platform.find("android")) and config.check_option("config_addon_android", option_name):
+    return True
+  return False
+
+def qt_config_platform_addon(platform):
+  config_addon = ""
+  if (0 == platform.find("win")):
+    config_addon += (" " + config.option("config_addon_windows"))
+  elif (0 == platform.find("linux")):
+    config_addon += (" " + config.option("config_addon_linux"))
+  elif (0 == platform.find("mac")):
+    config_addon += (" " + config.option("config_addon_macos"))
+  elif (0 == platform.find("ios")):
+    config_addon += (" " + config.option("config_addon_ios"))
+  elif (0 == platform.find("android")):
+    config_addon += (" " + config.option("config_addon_android"))
+  if (config_addon == " "):
+    config_addon = ""
+  return config_addon
+
 def qt_config(platform):
   config_param = config.option("module") + " " + config.option("config") + " " + config.option("features")
   config_param_lower = config_param.lower()
@@ -599,13 +731,22 @@ def qt_config(platform):
     config_param += " apple_silicon use_javascript_core"
   if config.check_option("module", "mobile"):
     config_param += " support_web_socket"
-  if (config.option("vs-version") == "2019"):
-    config_param += " v8_version_89 vs2019"
+
+  is_disable_pch = False
+  if ("ios" == platform):
+    is_disable_pch = True
+  if (0 == platform.find("android")):
+    is_disable_pch = True
+  if not config.check_option("config", "debug"):
+    is_disable_pch = True
+
+  if is_disable_pch:
+    config_param += " disable_precompiled_header"
 
   if ("linux_arm64" == platform):
     config_param += " linux_arm64"
-  if config.check_option("platform", "linux_arm64"):
-    config_param += " v8_version_89"
+
+  config_param += qt_config_platform_addon(platform)
   return config_param
 
 def qt_major_version():
@@ -702,16 +843,16 @@ def app_make():
   return "make"
 
 # doctrenderer.config
-def generate_doctrenderer_config(path, root, product, vendor = ""):
+def generate_doctrenderer_config(path, root, product, vendor = "", dictionaries = ""):
   content = "<Settings>\n"
 
   content += ("<file>" + root + "sdkjs/common/Native/native.js</file>\n")
   content += ("<file>" + root + "sdkjs/common/Native/jquery_native.js</file>\n")
 
   if ("server" != product):
-    content += ("<file>" + root + "sdkjs/common/AllFonts.js</file>\n")
+    content += ("<allfonts>" + root + "sdkjs/common/AllFonts.js</allfonts>\n")
   else:
-    content += ("<file>./AllFonts.js</file>\n")
+    content += ("<allfonts>./AllFonts.js</allfonts>\n")
 
   vendor_dir = vendor
   if ("" == vendor_dir):
@@ -719,27 +860,16 @@ def generate_doctrenderer_config(path, root, product, vendor = ""):
     vendor_dir = root + vendor_dir + "/vendor/"
 
   content += ("<file>" + vendor_dir + "xregexp/xregexp-all-min.js</file>\n")
-  content += ("<htmlfile>" + vendor_dir + "jquery/jquery.min.js</htmlfile>\n")
+  content += ("<sdkjs>" + root + "sdkjs</sdkjs>\n")
 
-  content += "<DoctSdk>\n"
-  content += ("<file>" + root + "sdkjs/word/sdk-all-min.js</file>\n")
-  content += ("<file>" + root + "sdkjs/common/libfont/js/fonts.js</file>\n")
-  content += ("<file>" + root + "sdkjs/word/sdk-all.js</file>\n")
-  content += "</DoctSdk>\n"
-  content += "<PpttSdk>\n"
-  content += ("<file>" + root + "sdkjs/slide/sdk-all-min.js</file>\n")
-  content += ("<file>" + root + "sdkjs/common/libfont/js/fonts.js</file>\n")
-  content += ("<file>" + root + "sdkjs/slide/sdk-all.js</file>\n")
-  content += "</PpttSdk>\n"
-  content += "<XlstSdk>\n"
-  content += ("<file>" + root + "sdkjs/cell/sdk-all-min.js</file>\n")
-  content += ("<file>" + root + "sdkjs/common/libfont/js/fonts.js</file>\n")
-  content += ("<file>" + root + "sdkjs/cell/sdk-all.js</file>\n")
-  content += "</XlstSdk>\n"
+  if ("" != dictionaries):
+    content += ("<dictionaries>" + dictionaries + "</dictionaries>\n")
 
-  if ("desktop" == product):
-    content += "<htmlnoxvfb/>\n"
-    content += "<htmlfileinternal>./../</htmlfileinternal>\n"
+  if (False): # old html file
+    content += ("<htmlfile>" + vendor_dir + "jquery/jquery.min.js</htmlfile>\n")
+    if ("desktop" == product):
+      content += "<htmlnoxvfb/>\n"
+      content += "<htmlfileinternal>./../</htmlfileinternal>\n"
 
   content += "</Settings>"
 
@@ -748,7 +878,7 @@ def generate_doctrenderer_config(path, root, product, vendor = ""):
   file.close()
   return
 
-def generate_plist(path):
+def generate_plist_framework_folder(file):
   bundle_id_url = "com.onlyoffice."
   if ("" != get_env("PUBLISHER_BUNDLE_ID")):
     bundle_id_url = get_env("PUBLISHER_BUNDLE_ID")
@@ -761,43 +891,52 @@ def generate_plist(path):
   for n in bundle_version_natural:
     bundle_version.append(n)
 
-  for file in glob.glob(path + "/*.framework"):
-    if not is_dir(file):
-      continue
-    name = os.path.basename(file)
-    name = name.replace(".framework", "")
+  name = os.path.basename(file)
+  name = name.replace(".framework", "")
 
-    content = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-    content += "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-    content += "<plist version=\"1.0\">\n"
-    content += "<dict>\n"
-    content += "\t<key>CFBundleExecutable</key>\n"
-    content += ("\t<string>" + name + "</string>\n")
-    content += "\t<key>CFBundleGetInfoString</key>\n"
-    content += "\t<string>Created by " + bundle_creator + "</string>\n"
-    content += "\t<key>CFBundleIdentifier</key>\n"
-    content += "\t<string>" + bundle_id_url + correct_bundle_identifier(name) + "</string>\n"
-    content += "\t<key>CFBundlePackageType</key>\n"
-    content += "\t<string>FMWK</string>\n"
-    content += "\t<key>CFBundleShortVersionString</key>\n"
-    content += "\t<string>" + bundle_version[0] + "." + bundle_version[1] + "</string>\n"
-    content += "\t<key>CFBundleSignature</key>\n"
-    content += "\t<string>????</string>\n"
-    content += "\t<key>CFBundleVersion</key>\n"
-    content += "\t<string>" + bundle_version[0] + "." + bundle_version[1] + "." + bundle_version[2] + "</string>\n"
-    content += "\t<key>MinimumOSVersion</key>\n"
-    content += "\t<string>10.0</string>\n"
-    content += "</dict>\n"
-    content += "</plist>"
+  content = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+  content += "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+  content += "<plist version=\"1.0\">\n"
+  content += "<dict>\n"
+  content += "\t<key>CFBundleExecutable</key>\n"
+  content += ("\t<string>" + name + "</string>\n")
+  content += "\t<key>CFBundleGetInfoString</key>\n"
+  content += "\t<string>Created by " + bundle_creator + "</string>\n"
+  content += "\t<key>CFBundleIdentifier</key>\n"
+  content += "\t<string>" + bundle_id_url + correct_bundle_identifier(name) + "</string>\n"
+  content += "\t<key>CFBundlePackageType</key>\n"
+  content += "\t<string>FMWK</string>\n"
+  content += "\t<key>CFBundleShortVersionString</key>\n"
+  content += "\t<string>" + bundle_version[0] + "." + bundle_version[1] + "</string>\n"
+  content += "\t<key>CFBundleSignature</key>\n"
+  content += "\t<string>????</string>\n"
+  content += "\t<key>CFBundleVersion</key>\n"
+  content += "\t<string>" + bundle_version[0] + "." + bundle_version[1] + "." + bundle_version[2] + "</string>\n"
+  content += "\t<key>MinimumOSVersion</key>\n"
+  content += "\t<string>13.0</string>\n"
+  content += "</dict>\n"
+  content += "</plist>"
 
-    fileDst = file + "/Info.plist"
-    if is_file(fileDst):
-      delete_file(fileDst)
+  fileDst = file + "/Info.plist"
+  if is_file(fileDst):
+    delete_file(fileDst)
 
-    fileInfo = codecs.open(fileDst, "w", "utf-8")
-    fileInfo.write(content)
-    fileInfo.close()
-      
+  fileInfo = codecs.open(fileDst, "w", "utf-8")
+  fileInfo.write(content)
+  fileInfo.close()
+  return
+
+def generate_plist(path):
+  src_folder = path
+  if ("/" != path[-1:]):
+    src_folder += "/"
+  src_folder += "*"
+  for file in glob.glob(src_folder):
+    if (is_dir(file)):
+      if file.endswith(".framework"):
+        generate_plist_framework_folder(file)
+      else:
+        generate_plist(file)
   return
 
 def correct_bundle_identifier(bundle_identifier):
@@ -834,22 +973,6 @@ def get_web_apps_addons():
   for name in addons_list:
     result[name] = [True, False]
   return result
-
-def get_plugins(plugins_list=""):
-  result = {}
-  if ("" == plugins_list):
-    return result
-  plugins_list = plugins_list.rsplit(", ")
-  plugins_dir = get_script_dir() + "/../../sdkjs-plugins"
-  for name in plugins_list:
-    result["plugin-" + name] = [True, plugins_dir]
-  return result
-
-def get_sdkjs_plugins():
-  return get_plugins(config.option("sdkjs-plugin"))
-
-def get_sdkjs_plugins_server():
-  return get_plugins(config.option("sdkjs-plugin-server"))
 
 def sdkjs_addons_param():
   if ("" == config.option("sdkjs-addons")):
@@ -895,9 +1018,15 @@ def extract(src, dst):
   app = "7za" if ("mac" == host_platform()) else "7z"
   return cmd_exe(app, ["x", "-y", src, "-o" + dst])
 
+def extract_unicode(src, dst):
+  if "windows" == host_platform():
+    run_as_bat_win_isolate([u"chcp 65001", u"call 7z.exe x -y \"" + src + u"\" \"-o" + dst + u"\"", u"exit"])
+    return
+  return extract(src, dst)
+
 def archive_folder(src, dst):
   app = "7za" if ("mac" == host_platform()) else "7z"
-  return cmd_exe(app, ["a", "-r", dst, src])
+  return cmd_exe(app, ["a", dst, src])
 
 # windows vcvarsall
 def _call_vcvarsall_and_return_env(arch):
@@ -960,6 +1089,20 @@ def run_as_bat(lines, is_no_errors=False):
   delete_file(name)
   return
 
+def run_as_bat_win_isolate(lines, is_no_errors=False):
+  file = codecs.open("tmp.bat", "w", "utf-8")
+  file.write("\n".join(lines))
+  file.close()
+
+  file2 = codecs.open("tmp2.bat", "w", "utf-8")
+  file2.write("start /wait /min tmp.bat")
+  file2.close()
+
+  cmd("tmp2.bat", [], is_no_errors)
+  delete_file("tmp.bat")
+  delete_file("tmp2.bat")
+  return
+
 def save_as_script(path, lines):
   content = "\n".join(lines)
 
@@ -997,7 +1140,7 @@ def get_file_last_modified_url(url):
 
 def mac_correct_rpath_binary(path, libs):
   for lib in libs:
-    cmd("install_name_tool", ["-change", "lib" + lib + ".dylib", "@rpath/lib" + lib + ".dylib", path])
+    cmd("install_name_tool", ["-change", "lib" + lib + ".dylib", "@rpath/lib" + lib + ".dylib", path], True)
   return
 
 def mac_correct_rpath_library(name, libs):
@@ -1008,23 +1151,22 @@ def mac_correct_rpath_x2t(dir):
   os.chdir(dir)
   mac_correct_rpath_library("icudata.58", [])
   mac_correct_rpath_library("icuuc.58", ["icudata.58"])
-  mac_correct_rpath_library("UnicodeConverter", ["icuuc.58", "icudata.58", "kernel"])
-  mac_correct_rpath_library("kernel", [])
-  mac_correct_rpath_library("kernel_network", ["kernel"])
+  mac_correct_rpath_library("UnicodeConverter", ["icuuc.58", "icudata.58"])
+  mac_correct_rpath_library("kernel", ["UnicodeConverter"])
+  mac_correct_rpath_library("kernel_network", ["UnicodeConverter", "kernel"])
   mac_correct_rpath_library("graphics", ["UnicodeConverter", "kernel"])
   mac_correct_rpath_library("doctrenderer", ["UnicodeConverter", "kernel", "kernel_network", "graphics"])
   mac_correct_rpath_library("HtmlFile2", ["UnicodeConverter", "kernel", "kernel_network", "graphics"])
-  mac_correct_rpath_library("EpubFile", ["kernel", "HtmlFile2", "graphics"])
+  mac_correct_rpath_library("EpubFile", ["UnicodeConverter", "kernel", "HtmlFile2", "graphics"])
   mac_correct_rpath_library("Fb2File", ["UnicodeConverter", "kernel", "graphics"])
   mac_correct_rpath_library("HtmlRenderer", ["UnicodeConverter", "kernel", "graphics"])
-  mac_correct_rpath_library("PdfWriter", ["UnicodeConverter", "kernel", "graphics", "kernel_network"])
-  mac_correct_rpath_library("DjVuFile", ["kernel", "UnicodeConverter", "graphics", "PdfWriter"])
-  mac_correct_rpath_library("PdfReader", ["kernel", "UnicodeConverter", "graphics", "PdfWriter", "HtmlRenderer"])
-  mac_correct_rpath_library("XpsFile", ["kernel", "UnicodeConverter", "graphics", "PdfWriter"])
-  mac_correct_rpath_library("DocxRenderer", ["kernel", "UnicodeConverter", "graphics"])
+  mac_correct_rpath_library("PdfFile", ["UnicodeConverter", "kernel", "graphics", "kernel_network"])
+  mac_correct_rpath_library("DjVuFile", ["UnicodeConverter", "kernel", "graphics", "PdfFile"])
+  mac_correct_rpath_library("XpsFile", ["UnicodeConverter", "kernel", "graphics", "PdfFile"])
+  mac_correct_rpath_library("DocxRenderer", ["UnicodeConverter", "kernel", "graphics"])
   cmd("chmod", ["-v", "+x", "./x2t"])
   cmd("install_name_tool", ["-add_rpath", "@executable_path", "./x2t"], True)
-  mac_correct_rpath_binary("./x2t", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "kernel_network", "graphics", "PdfWriter", "HtmlRenderer", "PdfReader", "XpsFile", "DjVuFile", "HtmlFile2", "Fb2File", "EpubFile", "doctrenderer", "DocxRenderer"])
+  mac_correct_rpath_binary("./x2t", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "kernel_network", "graphics", "PdfFile", "HtmlRenderer", "XpsFile", "DjVuFile", "HtmlFile2", "Fb2File", "EpubFile", "doctrenderer", "DocxRenderer"])
   if is_file("./allfontsgen"):
     cmd("chmod", ["-v", "+x", "./allfontsgen"])
     cmd("install_name_tool", ["-add_rpath", "@executable_path", "./allfontsgen"], True)
@@ -1033,6 +1175,23 @@ def mac_correct_rpath_x2t(dir):
     cmd("chmod", ["-v", "+x", "./allthemesgen"])
     cmd("install_name_tool", ["-add_rpath", "@executable_path", "./allthemesgen"], True)
     mac_correct_rpath_binary("./allthemesgen", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "graphics", "kernel_network", "doctrenderer"])
+  if is_file("./pluginsmanager"):
+    cmd("chmod", ["-v", "+x", "./pluginsmanager"])
+    cmd("install_name_tool", ["-add_rpath", "@executable_path", "./pluginsmanager"], True)
+    mac_correct_rpath_binary("./pluginsmanager", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "kernel_network"])
+  if is_file("./vboxtester"):
+    cmd("chmod", ["-v", "+x", "./vboxtester"])
+    cmd("install_name_tool", ["-add_rpath", "@executable_path", "./vboxtester"], True)
+    mac_correct_rpath_binary("./vboxtester", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "kernel_network"])
+  os.chdir(cur_dir)
+  return
+
+def mac_correct_rpath_docbuilder(dir):
+  cur_dir = os.getcwd()
+  os.chdir(dir)
+  cmd("chmod", ["-v", "+x", "./docbuilder"])
+  cmd("install_name_tool", ["-add_rpath", "@executable_path", "./docbuilder"], True)
+  mac_correct_rpath_binary("./docbuilder", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "kernel_network", "graphics", "PdfFile", "HtmlRenderer", "XpsFile", "DjVuFile", "HtmlFile2", "Fb2File", "EpubFile", "doctrenderer", "DocxRenderer"])  
   os.chdir(cur_dir)
   return
 
@@ -1042,9 +1201,9 @@ def mac_correct_rpath_desktop(dir):
   os.chdir(dir)
   mac_correct_rpath_library("hunspell", [])
   mac_correct_rpath_library("ooxmlsignature", ["kernel"])
-  mac_correct_rpath_library("ascdocumentscore", ["UnicodeConverter", "kernel", "graphics", "kernel_network", "PdfWriter", "HtmlRenderer", "PdfReader", "XpsFile", "DjVuFile", "hunspell", "ooxmlsignature"])
+  mac_correct_rpath_library("ascdocumentscore", ["UnicodeConverter", "kernel", "graphics", "kernel_network", "PdfFile", "HtmlRenderer", "XpsFile", "DjVuFile", "hunspell", "ooxmlsignature"])
   cmd("install_name_tool", ["-change", "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework", "@rpath/Chromium Embedded Framework.framework/Chromium Embedded Framework", "libascdocumentscore.dylib"])
-  mac_correct_rpath_binary("./editors_helper.app/Contents/MacOS/editors_helper", ["ascdocumentscore", "UnicodeConverter", "kernel", "kernel_network", "graphics", "PdfWriter", "HtmlRenderer", "PdfReader", "XpsFile", "DjVuFile", "hunspell", "ooxmlsignature"])
+  mac_correct_rpath_binary("./editors_helper.app/Contents/MacOS/editors_helper", ["ascdocumentscore", "UnicodeConverter", "kernel", "kernel_network", "graphics", "PdfFile", "HtmlRenderer", "XpsFile", "DjVuFile", "hunspell", "ooxmlsignature"])
   cmd("install_name_tool", ["-add_rpath", "@executable_path/../../../../Frameworks", "./editors_helper.app/Contents/MacOS/editors_helper"], True)
   cmd("install_name_tool", ["-add_rpath", "@executable_path/../../../../Resources/converter", "./editors_helper.app/Contents/MacOS/editors_helper"], True)
   cmd("chmod", ["-v", "+x", "./editors_helper.app/Contents/MacOS/editors_helper"])
@@ -1079,7 +1238,7 @@ def common_check_version(name, good_version, clean_func):
   return
 
 def copy_sdkjs_plugin(src_dir, dst_dir, name, is_name_as_guid=False, is_desktop_local=False):
-  src_dir_path = src_dir + "/plugin-" + name
+  src_dir_path = src_dir + "/" + name
   if not is_dir(src_dir_path):
     src_dir_path = src_dir + "/" + name
   if not is_file(src_dir_path + "/config.json"):
@@ -1108,14 +1267,44 @@ def copy_sdkjs_plugin(src_dir, dst_dir, name, is_name_as_guid=False, is_desktop_
   if is_dir(dst_dir_path):
     delete_dir(dst_dir_path)
   create_dir(dst_dir_path)
-  copy_dir_content(src_dir_path, dst_dir + "/" + guid, "", ".git")
+  copy_dir_content(src_dir_path, dst_dir_path, "", ".git")
   if is_desktop_local:
-    for file in glob.glob(dst_dir + "/" + guid + "/*.html"):
+    for file in glob.glob(dst_dir_path + "/*.html"):
       replaceInFile(file, "https://onlyoffice.github.io/sdkjs-plugins/", "../")
+  dst_deploy_dir = dst_dir_path + "/deploy"
+  if is_dir(dst_deploy_dir):
+    delete_dir(dst_deploy_dir)
+  return
+
+def copy_marketplace_plugin(dst_dir, is_name_as_guid=False, is_desktop_local=False, is_store_copy=False):
+  git_dir = __file__script__path__ + "/../.."
+  if False:
+    # old version
+    base.copy_sdkjs_plugin(git_dir + "/desktop-sdk/ChromiumBasedEditors/plugins", dst_dir, "manager", is_name_as_guid, is_desktop_local)
+    return
+  src_dir_path = git_dir + "/onlyoffice.github.io/store/plugin"
+  name = "marketplace"
+  if is_name_as_guid:
+    name = "{AA2EA9B6-9EC2-415F-9762-634EE8D9A95E}"
+
+  dst_dir_path = dst_dir + "/" + name
+  if is_dir(dst_dir_path):
+    delete_dir(dst_dir_path)
+  create_dir(dst_dir_path)
+
+  copy_dir_content(src_dir_path, dst_dir_path)
+  if is_desktop_local:
+    for file in glob.glob(dst_dir_path + "/*.html"):
+      replaceInFile(file, "https://onlyoffice.github.io/sdkjs-plugins/", "../")
+
+  if is_store_copy:
+    copy_dir(git_dir + "/onlyoffice.github.io/store", dst_dir_path + "/store")
+    delete_dir(dst_dir_path + "/store/plugin")
+    delete_dir(dst_dir_path + "/store/plugin-dev")
   return
 
 def copy_sdkjs_plugins(dst_dir, is_name_as_guid=False, is_desktop_local=False):
-  plugins_dir = get_script_dir() + "/../../sdkjs-plugins"
+  plugins_dir = __file__script__path__ + "/../../onlyoffice.github.io/sdkjs-plugins/content"
   plugins_list_config = config.option("sdkjs-plugin")
   if ("" == plugins_list_config):
     return
@@ -1125,7 +1314,7 @@ def copy_sdkjs_plugins(dst_dir, is_name_as_guid=False, is_desktop_local=False):
   return
 
 def copy_sdkjs_plugins_server(dst_dir, is_name_as_guid=False, is_desktop_local=False):
-  plugins_dir = get_script_dir() + "/../../sdkjs-plugins"
+  plugins_dir = __file__script__path__ + "/../../onlyoffice.github.io/sdkjs-plugins/content"
   plugins_list_config = config.option("sdkjs-plugin-server")
   if ("" == plugins_list_config):
     return
@@ -1150,6 +1339,14 @@ def support_old_versions_plugins(out_dir):
     file.write(content_plugin_base)
   delete_file(out_dir + "/plugins.js")
   delete_file(out_dir + "/plugins-ui.js")  
+  return
+
+def generate_sdkjs_plugin_list(dst):
+  plugins_list = config.option("sdkjs-plugin").rsplit(", ") \
+               + config.option("sdkjs-plugin-server").rsplit(", ")
+  with open(get_path(dst), 'w') as file:
+    dump = json.dumps(sorted(plugins_list), indent=4)
+    file.write(re.sub(r"^(\s{4})", '\t', dump, 0, re.MULTILINE))
   return
 
 def get_xcode_major_version():
@@ -1222,6 +1419,16 @@ def make_sln(directory, args, is_no_errors):
   os.environ.update(old_env)
   return
 
+def make_sln_project(directory, sln_path):
+  args = []
+  args.append(sln_path)
+  args.append("/Rebuild")
+  if (config.check_option("platform", "win_64")):
+    make_sln(directory, args + ["\"Release|x64\""], True)
+  if True:#(config.check_option("platform", "win_32")):
+    make_sln(directory, args + ["\"Release|Win32\""], True)
+  return
+
 def get_android_sdk_home():
   ndk_root_path = get_env("ANDROID_NDK_ROOT")
   if (-1 != ndk_root_path.find("/ndk/")):
@@ -1244,21 +1451,213 @@ def copy_v8_files(core_dir, deploy_dir, platform, is_xp=False):
   if (-1 != config.option("config").find("use_javascript_core")):
     return
   directory_v8 = core_dir + "/Common/3dParty"
+  
   if is_xp:
-    directory_v8 += "/v8/v8_xp/"
-  elif (-1 != config.option("config").lower().find("v8_version_89")):
-    directory_v8 += "/v8_89/v8/out.gn/"
-  if (config.option("vs-version") == "2019"):
-    directory_v8 += "/v8_89/v8/out.gn/"
-  else:
-    directory_v8 += "/v8/v8/out.gn/"
-
-  if is_xp:
+    directory_v8 += "/v8/v8_xp"
     copy_files(directory_v8 + platform + "/release/icudt*.dll", deploy_dir + "/")
     return
+  
+  if config.check_option("config", "v8_version_60"):
+    directory_v8 += "/v8/v8/out.gn/"
+  else:
+    directory_v8 += "/v8_89/v8/out.gn/"
 
   if (0 == platform.find("win")):
     copy_files(directory_v8 + platform + "/release/icudt*.dat", deploy_dir + "/")
   else:
-    copy_file(directory_v8 + platform + "/icudtl.dat", deploy_dir + "/icudtl.dat")
+    copy_files(directory_v8 + platform + "/icudt*.dat", deploy_dir + "/")
+  return
+
+def clone_marketplace_plugin(out_dir, is_name_as_guid=False, is_replace_paths=False, is_delete_git_dir=True, git_owner=""):  
+  old_cur = os.getcwd()
+  os.chdir(out_dir)
+  git_update("onlyoffice.github.io", False, True, git_owner)
+  os.chdir(old_cur)
+
+  dst_dir_name = "marketplace"
+  if is_name_as_guid:
+    config_content = readFile(out_dir + "/onlyoffice.github.io/store/plugin/config.json")
+    index_start = config_content.find("\"asc.{")
+    index_start += 5
+    index_end = config_content.find("}", index_start)
+    index_end += 1
+    guid = config_content[index_start:index_end]
+    dst_dir_name = guid
+
+  dst_dir_path = out_dir + "/" + dst_dir_name
+
+  if is_dir(dst_dir_path):
+    delete_dir(dst_dir_path)
+  copy_dir(out_dir + "/onlyoffice.github.io/store/plugin", dst_dir_path)
+  
+  if is_replace_paths:
+    for file in glob.glob(dst_dir_path + "/*.html"):
+      replaceInFile(file, "https://onlyoffice.github.io/sdkjs-plugins/", "../")
+        
+  if is_delete_git_dir:
+    delete_dir_with_access_error(out_dir + "/onlyoffice.github.io")
+  return
+
+def correctPathForBuilder(path):
+  replace_value = "../../../build/"
+  if (config.option("branding") != ""):
+    replace_value += (config.option("branding") + "/")
+  replace_value += "lib/"
+  if (config.check_option("config", "debug")):
+    replace_value += ("debug/")
+  if (replace_value == "../../../build/lib/"):
+    return ""
+  new_path = path + ".bak"
+  copy_file(path, new_path)
+  replaceInFile(path, "../../../build/lib/", replace_value)
+  return new_path
+
+def restorePathForBuilder(new_path):
+  if ("" == new_path):
+    return
+  old_path = new_path[:-4]
+  delete_file(old_path)
+  copy_file(new_path, old_path)
+  delete_file(new_path);
+  return
+
+def generate_check_linux_system(build_tools_dir, out_dir):
+  create_dir(out_dir + "/.system")
+  copy_file(build_tools_dir + "/tools/linux/check_system/check.sh", out_dir + "/.system/check.sh")
+  copy_file(build_tools_dir + "/tools/linux/check_system/libstdc++.so.6", out_dir + "/.system/libstdc++.so.6")
+  return
+
+def convert_ios_framework_to_xcframework(folder, lib):
+  cur_dir = os.getcwd()
+  os.chdir(folder)
+  
+  create_dir(lib + "_xc_tmp")
+  create_dir(lib + "_xc_tmp/iphoneos")
+  create_dir(lib + "_xc_tmp/iphonesimulator")
+  copy_dir(lib + ".framework", lib + "_xc_tmp/iphoneos/" + lib + ".framework")
+  copy_dir(lib + ".framework", lib + "_xc_tmp/iphonesimulator/" + lib + ".framework")
+
+  cmd("xcrun", ["lipo", "-remove", "x86_64", "./" + lib + "_xc_tmp/iphoneos/" + lib + ".framework/" + lib, 
+    "-o", "./" + lib + "_xc_tmp/iphoneos/" + lib + ".framework/" + lib])
+  cmd("xcrun", ["lipo", "-remove", "arm64", "./" + lib + "_xc_tmp/iphonesimulator/" + lib + ".framework/" + lib, 
+    "-o", "./" + lib + "_xc_tmp/iphonesimulator/" + lib + ".framework/" + lib])
+
+  cmd("xcodebuild", ["-create-xcframework", 
+    "-framework", "./" + lib + "_xc_tmp/iphoneos/" + lib + ".framework/", 
+    "-framework", "./" + lib + "_xc_tmp/iphonesimulator/" + lib + ".framework/",
+    "-output", lib + ".xcframework"])
+
+  delete_dir(lib + "_xc_tmp")
+
+  os.chdir(cur_dir)
+  return
+
+def convert_ios_framework_to_xcframework_folder(folder, libs):
+  for lib in libs:
+    convert_ios_framework_to_xcframework(folder, lib)
+  return
+
+def change_elf_rpath(path, origin):
+  # excludes ---
+  if (-1 != path.find("libicudata.so.58")):
+    return
+  # ------------
+  tools_dir = get_script_dir() + "/../tools/linux/elf/"
+  result_obj = run_command(tools_dir + "readelf -d '" + path + "' | grep R*PATH")
+  result = result_obj["stdout"]
+  result_error = result_obj["stderr"]
+  if (result_error != ""):
+    return
+  if (-1 != result.find("Error:")) or (-1 != result.find(" ELF ")):
+    return
+  is_rpath = True
+  if (-1 != result.find("Library runpath: [")):
+    is_rpath = False
+  old_path = run_command(tools_dir + "patchelf --print-rpath '" + path + "'")['stdout']
+  if (-1 != old_path.find(origin)):
+    return
+  new_path = old_path
+  new_path = new_path.replace("$ORIGIN", "\$ORIGIN")
+  if ("" != new_path):
+    new_path += ":"
+  new_path += origin
+  if (-1 != old_path.find("$ORIGIN/converter")) or (-1 != path.find("/desktopeditors/converter")):
+    new_path += (":" + origin + "/converter")
+  if (-1 != old_path.find("$ORIGIN/system")):
+    new_path += (":" + origin + "/system")
+  if is_rpath:
+    cmd(tools_dir + "patchelf", ["--force-rpath", "--set-rpath", new_path, path], True)
+  else:
+    cmd(tools_dir + "patchelf", ["--set-rpath", new_path, path], True)
+  #print("[" + os.path.basename(path) + "] old: " + old_path + "; new: " + new_path)
+  return
+  
+def correct_elf_rpath_directory(directory, origin, is_recursion = True):
+  for file in glob.glob(directory + "/*"):
+    if is_file(file):
+      change_elf_rpath(file, origin)
+    elif is_dir(file) and is_recursion:
+      correct_elf_rpath_directory(file, origin)
+  return
+
+def is_need_build_js():
+  if "osign" == config.option("module"):
+    return False
+  return True
+
+def copy_dictionaries(src, dst, is_hyphen = True, is_spell = True):
+  if (False == is_hyphen) and (False == is_spell):
+    return
+
+  if not is_dir(dst):
+    create_dir(dst)
+
+  src_folder = src
+  if ("/" != src[-1:]):
+    src_folder += "/"
+  src_folder += "*"
+  for file in glob.glob(src_folder):
+    if is_file(file):
+      copy_file(file, dst)
+      continue
+
+    basename = os.path.basename(file)
+    if (".git" == basename):
+      continue
+
+    if (True == is_hyphen) and (True == is_spell):
+      copy_dir(file, dst + "/" + basename)
+      continue
+
+    is_spell_present = is_file(file + "/" + basename + ".dic")
+    is_hyphen_present = is_file(file + "/hyph_" + basename + ".dic")
+
+    is_dir_need = False
+    if (is_hyphen and is_hyphen_present) or (is_spell and is_spell_present):
+      is_dir_need = True
+
+    if not is_dir_need:
+      continue
+
+    lang_folder = dst + "/" + basename
+    create_dir(lang_folder)
+
+    if is_hyphen and is_hyphen_present:
+      copy_dir_content(file, lang_folder, "hyph_", "")
+    
+    if is_spell and is_spell_present:
+      copy_dir_content(file, lang_folder, "", "hyph_")
+
+  if is_file(dst + "/en_US/en_US_thes.dat"):
+    delete_file(dst + "/en_US/en_US_thes.dat")
+    delete_file(dst + "/en_US/en_US_thes.idx")
+  
+  if is_file(dst + "/ru_RU/ru_RU_oo3.dic"):
+    delete_file(dst + "/ru_RU/ru_RU_oo3.dic")
+    delete_file(dst + "/ru_RU/ru_RU_oo3.aff")
+
+  if is_file(dst + "/uk_UA/th_uk_UA.dat"):
+    delete_file(dst + "/uk_UA/th_uk_UA.dat")
+    delete_file(dst + "/uk_UA/th_uk_UA.idx")
+
   return

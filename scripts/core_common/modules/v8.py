@@ -42,16 +42,13 @@ def is_xp_platform():
   return False
 
 def is_use_clang():
-  gcc_version = 4
-  gcc_version_str = base.run_command("gcc -dumpfullversion -dumpversion")['stdout']
-  if (gcc_version_str != ""):
-    gcc_version = int(gcc_version_str.split(".")[0])
+  gcc_version = base.get_gcc_version()  
     
   is_clang = "false"
-  if (gcc_version >= 6):
+  if (gcc_version >= 6000):
     is_clang = "true"
 
-  print("gcc major version: " + str(gcc_version) + ", use clang:" + is_clang)
+  print("gcc version: " + str(gcc_version) + ", use clang:" + is_clang)
   return is_clang
 
 def make():
@@ -71,13 +68,9 @@ def make():
   if ("mac" == base.host_platform()) and (-1 == config.option("config").find("use_v8")):
     return
 
-  use_v8_89 = False
-  if (-1 != config.option("config").lower().find("v8_version_89")):
-    use_v8_89 = True
-  if ("windows" == base.host_platform()) and (config.option("vs-version") == "2019"):
-    use_v8_89 = True
-  if config.check_option("platform", "linux_arm64"):
-    use_v8_89 = True
+  use_v8_89 = True
+  if config.check_option("config", "v8_version_60"):
+    use_v8_89 = False
 
   if (use_v8_89):
     v8_89.make()
@@ -186,6 +179,7 @@ def make():
     base.cmd2("gn", ["gen", "out.gn/mac_64", "--args=\"is_debug=false " + base_args64 + "\""])
     base.cmd("ninja", ["-C", "out.gn/mac_64"])
 
+  # add enable_iterator_debugging=false for disable _ITERATOR_DEBUG_LEVEL
   if config.check_option("platform", "win_64"):
     if (-1 != config.option("config").lower().find("debug")):
       base.cmd2("gn", ["gen", "out.gn/win_64/debug", "--args=\"is_debug=true " + base_args64 + " is_clang=false\""])
@@ -272,6 +266,7 @@ def make_xp():
     "  replaceInFile(file, '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>')",
     ]);
 
+  # add "SET CL=\"/D_ITERATOR_DEBUG_LEVEL=0\"" before devenv for disable _ITERATOR_DEBUG_LEVEL in debug
   if config.check_option("platform", "win_64_xp"):
     if not base.is_dir("win_64/release"):
       base.run_as_bat(["call python v8/build/gyp_v8 -Dtarget_arch=x64", "call python v8/build/common_xp.py", "call devenv v8/tools/gyp/v8.sln /Rebuild Release"])

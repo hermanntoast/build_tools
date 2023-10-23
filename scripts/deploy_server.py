@@ -58,7 +58,6 @@ def make():
     base.create_dir(build_server_dir + '/Metrics/node_modules/modern-syslog/build/Release')
     base.copy_file(bin_server_dir + "/Metrics/node_modules/modern-syslog/build/Release/core.node", build_server_dir + "/Metrics/node_modules/modern-syslog/build/Release/core.node")
 
-
     qt_dir = base.qt_setup(native_platform)
     platform = native_platform
 
@@ -75,8 +74,7 @@ def make():
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "kernel_network")
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "UnicodeConverter")
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "graphics")
-    base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "PdfWriter")
-    base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "PdfReader")
+    base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "PdfFile")
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "DjVuFile")
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "XpsFile")
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "HtmlFile2")
@@ -85,9 +83,13 @@ def make():
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "Fb2File")
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "EpubFile")
     base.copy_lib(core_build_dir + "/lib/" + platform_postfix, converter_dir, "DocxRenderer")
+    base.copy_file(git_dir + "/sdkjs/pdf/src/engine/cmap.bin", converter_dir + "/cmap.bin")
     base.copy_exe(core_build_dir + "/bin/" + platform_postfix, converter_dir, "x2t")
 
-    base.generate_doctrenderer_config(converter_dir + "/DoctRenderer.config", "../../../", "server")
+    #if (native_platform == "linux_64"):
+    #  base.generate_check_linux_system(git_dir + "/build_tools", converter_dir)
+
+    base.generate_doctrenderer_config(converter_dir + "/DoctRenderer.config", "../../../", "server", "", "../../../dictionaries")
 
     # icu
     if (0 == platform.find("win")):
@@ -106,38 +108,44 @@ def make():
 
     # builder
     base.copy_exe(core_build_dir + "/bin/" + platform_postfix, converter_dir, "docbuilder")
-    base.copy_dir(git_dir + "/DocumentBuilder/empty", converter_dir + "/empty")
+    base.copy_dir(git_dir + "/document-templates/new/en-US", converter_dir + "/empty")
 
     # js
     js_dir = root_dir
     base.copy_dir(base_dir + "/js/" + branding + "/builder/sdkjs", js_dir + "/sdkjs")
     base.copy_dir(base_dir + "/js/" + branding + "/builder/web-apps", js_dir + "/web-apps")
+
+    # add embed worker code
+    base.cmd_in_dir(git_dir + "/sdkjs/common/embed", "python", ["make.py", js_dir + "/web-apps/apps/api/documents/api.js"])
     
     # plugins
     base.create_dir(js_dir + "/sdkjs-plugins")
-    base.copy_sdkjs_plugins(js_dir + "/sdkjs-plugins", False, True)
-    base.copy_sdkjs_plugins_server(js_dir + "/sdkjs-plugins", False, True)
+    base.copy_marketplace_plugin(js_dir + "/sdkjs-plugins", False, True)
+    if ("1" == config.option("preinstalled-plugins")):
+      base.copy_sdkjs_plugins(js_dir + "/sdkjs-plugins", False, True)
+      base.copy_sdkjs_plugins_server(js_dir + "/sdkjs-plugins", False, True)
+    else:
+      base.generate_sdkjs_plugin_list(js_dir + "/sdkjs-plugins/plugin-list-default.json")
     base.create_dir(js_dir + "/sdkjs-plugins/v1")
     base.download("https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.js", js_dir + "/sdkjs-plugins/v1/plugins.js")
     base.download("https://onlyoffice.github.io/sdkjs-plugins/v1/plugins-ui.js", js_dir + "/sdkjs-plugins/v1/plugins-ui.js")
     base.download("https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.css", js_dir + "/sdkjs-plugins/v1/plugins.css")
     base.support_old_versions_plugins(js_dir + "/sdkjs-plugins")
-    
+
     # tools
     tools_dir = root_dir + "/server/tools"
     base.create_dir(tools_dir)
     base.copy_exe(core_build_dir + "/bin/" + platform_postfix, tools_dir, "allfontsgen")
     base.copy_exe(core_build_dir + "/bin/" + platform_postfix, tools_dir, "allthemesgen")
-
+    if ("1" != config.option("preinstalled-plugins")):
+      base.copy_exe(core_build_dir + "/bin/" + platform_postfix, tools_dir, "pluginsmanager")
+    
     branding_dir = server_dir + "/branding"
     if("" != config.option("branding") and "onlyoffice" != config.option("branding")):
       branding_dir = git_dir + '/' + config.option("branding") + '/server'
 
     #dictionaries
-    spellchecker_dictionaries = root_dir + '/dictionaries'
-    spellchecker_dictionaries_files = server_dir + '/../dictionaries/*_*'
-    base.create_dir(spellchecker_dictionaries)
-    base.copy_files(spellchecker_dictionaries_files, spellchecker_dictionaries)
+    base.copy_dictionaries(server_dir + "/../dictionaries", root_dir + "/dictionaries")
 
     if (0 == platform.find("win")):
       exec_ext = '.exe'
@@ -159,8 +167,8 @@ def make():
     #document-templates
     document_templates_files = server_dir + '/../document-templates'
     document_templates = build_server_dir + '/../document-templates'
-    base.create_dir(document_templates)
-    base.copy_dir_content(document_templates_files, document_templates, "", ".git")
+    base.copy_dir(document_templates_files + '/new', document_templates + '/new')
+    base.copy_dir(document_templates_files + '/sample', document_templates + '/sample')
 
     #license
     license_file1 = server_dir + '/LICENSE.txt'
