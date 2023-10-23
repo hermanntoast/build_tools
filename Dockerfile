@@ -1,4 +1,4 @@
-ARG product_version=7.1.1
+ARG product_version=7.5.0
 
 FROM ubuntu:16.04 as build-stage
 
