@@ -39,6 +39,9 @@ def is_os_arm():
     return False
   return True
 
+def get_platform():
+  return platform.machine().lower()
+
 def is_python_64bit():
   return (struct.calcsize("P") == 8)
 
@@ -194,7 +197,7 @@ def copy_dir(src, dst):
   except:
     if ("windows" == host_platform()) and copy_dir_windows(src, dst):
       return
-    print('Directory not copied. Error: %s' % e)
+    print("Directory not copied")
   return
 
 def copy_dir_windows(src, dst):
@@ -250,6 +253,9 @@ def copy_lib(src, dst, name):
         create_dir(dst + "/simulator")
         copy_dir(src + "/simulator/" + name + ".framework", dst + "/simulator/" + name + ".framework")
 
+        if is_dir(dst + "/" + name + ".xcframework"):
+          delete_dir(dst + "/" + name + ".xcframework")
+
         cmd("xcodebuild", ["-create-xcframework", 
             "-framework", dst + "/" + name + ".framework", 
             "-framework", dst + "/simulator/" + name + ".framework", 
@@ -292,17 +298,34 @@ def copy_exe(src, dst, name):
   copy_file(src + "/" + name + exe_ext, dst + "/" + name + exe_ext)
   return
 
+def readFileCommon(path):
+  file_data = ""
+  try:
+    with open(get_path(path), "r") as file:
+      file_data = file.read()
+  except Exception as e:
+    with open(get_path(path), "r", encoding="utf-8") as file:
+      file_data = file.read()
+  return file_data
+
+def writeFileCommon(path, data):
+  file_data = ""
+  try:
+    with open(get_path(path), "w") as file:
+      file.write(data)
+  except Exception as e:
+    with open(get_path(path), "w", encoding="utf-8") as file:
+      file.write(data)
+  return
+
 def replaceInFile(path, text, textReplace):
   if not is_file(path):
     print("[replaceInFile] file not exist: " + path)
     return
-  filedata = ""
-  with open(get_path(path), "r") as file:
-    filedata = file.read()
+  filedata = readFileCommon(path)
   filedata = filedata.replace(text, textReplace)
   delete_file(path)
-  with open(get_path(path), "w") as file:
-    file.write(filedata)
+  writeFileCommon(path, filedata)
   return
 def replaceInFileUtf8(path, text, textReplace):
   if not is_file(path):
@@ -320,28 +343,21 @@ def replaceInFileRE(path, pattern, textReplace):
   if not is_file(path):
     print("[replaceInFile] file not exist: " + path)
     return
-  filedata = ""
-  with open(get_path(path), "r") as file:
-    filedata = file.read()
+  filedata = readFileCommon(path)
   filedata = re.sub(pattern, textReplace, filedata)
   delete_file(path)
-  with open(get_path(path), "w") as file:
-    file.write(filedata)
+  writeFileCommon(path, filedata)
   return
 
 def readFile(path):
   if not is_file(path):
     return ""
-  filedata = ""
-  with open(get_path(path), "r") as file:
-    filedata = file.read()
-  return filedata
+  return readFileCommon(path)
 
 def writeFile(path, data):
   if is_file(path):
     delete_file(path)
-  with open(get_path(path), "w") as file:
-    file.write(data)
+  writeFileCommon(path, data)
   return
 
 # system cmd methods ------------------------------------
@@ -371,7 +387,7 @@ def cmd2(prog, args=[], is_no_errors=False):
     sys.exit("Error (" + prog + "): " + str(ret))
   return ret
 
-def cmd_exe(prog, args):
+def cmd_exe(prog, args, is_no_errors=False):
   prog_dir = os.path.dirname(prog)
   env_dir = os.environ
   if ("linux" == host_platform()):
@@ -393,7 +409,7 @@ def cmd_exe(prog, args):
       command += (" \"" + arg + "\"")
     process = subprocess.Popen(command, stderr=subprocess.STDOUT, shell=True, env=env_dir)
     ret = process.wait()
-  if ret != 0:
+  if ret != 0 and True != is_no_errors:
     sys.exit("Error (" + prog + "): " + str(ret))
   return ret
 
@@ -413,12 +429,13 @@ def cmd_and_return_cwd(prog, args=[], is_no_errors=False):
 
 def run_command(sCommand):
   popen = subprocess.Popen(sCommand, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-  result = {'stdout' : '', 'stderr' : ''}
+  result = {'stdout' : '', 'stderr' : '', 'returncode' : 0}
   try:
     stdout, stderr = popen.communicate()
     popen.wait()
     result['stdout'] = stdout.strip().decode('utf-8', errors='ignore')
     result['stderr'] = stderr.strip().decode('utf-8', errors='ignore')
+    result['returncode'] = popen.returncode
   finally:
     popen.stdout.close()
     popen.stderr.close()
@@ -483,6 +500,31 @@ def set_cwd(dir):
   return
 
 # git ---------------------------------------------------
+def git_get_origin():
+  cur_dir = os.getcwd()
+  os.chdir(get_script_dir() + "/../")
+  ret = run_command("git config --get remote.origin.url")["stdout"]
+  os.chdir(cur_dir)
+  return ret
+
+def git_is_ssh():
+  git_protocol = config.option("git-protocol")
+  if (git_protocol == "https"):
+    return False
+  if (git_protocol == "ssh"):
+    return True
+  origin = git_get_origin()
+  if (git_protocol == "auto") and (origin.find(":ONLYOFFICE/") != -1):
+    return True
+  return False
+
+def get_ssh_base_url():
+  cur_origin = git_get_origin()
+  ind = cur_origin.find(":ONLYOFFICE/")
+  if (ind == -1):
+    return "git@github.com:ONLYOFFICE/"
+  return cur_origin[:ind+12]
+
 def git_update(repo, is_no_errors=False, is_current_dir=False, git_owner=""):
   print("[git] update: " + repo)
   owner = git_owner if git_owner else "ONLYOFFICE"
@@ -533,9 +575,11 @@ def get_repositories():
   result.update(get_sdkjs_addons())
   result["onlyoffice.github.io"] = [False, False]
   result["web-apps"] = [False, False]
-  result.update(get_web_apps_addons())
   result["dictionaries"] = [False, False]
   result["core-fonts"] = [False, False]
+
+  if config.check_option("module", "server"):
+    result.update(get_web_apps_addons())
 
   if config.check_option("module", "builder"):
     result["document-templates"] = [False, False]
@@ -569,8 +613,8 @@ def get_branding_repositories(checker):
 def create_pull_request(branches_to, repo, is_no_errors=False, is_current_dir=False):
   print("[git] create pull request: " + repo)
   url = "https://github.com/ONLYOFFICE/" + repo + ".git"
-  if config.option("git-protocol") == "ssh":
-    url = "git@github.com:ONLYOFFICE/" + repo + ".git"
+  if git_is_ssh():
+    url = get_ssh_base_url() + repo + ".git"
   folder = get_script_dir() + "/../../" + repo
   if is_current_dir:
     folder = repo
@@ -699,6 +743,22 @@ def check_congig_option_with_platfom(platform, option_name):
     return True
   return False
 
+def correct_makefile_after_qmake(platform, file):
+  if (0 == platform.find("android")):
+    if ("android_arm64_v8a" == platform):
+      replaceInFile(file, "_arm64-v8a.a", ".a")
+      replaceInFile(file, "_arm64-v8a.so", ".so")
+    if ("android_armv7" == platform):
+      replaceInFile(file, "_armeabi-v7a.a", ".a")
+      replaceInFile(file, "_armeabi-v7a.so", ".so")
+    if ("android_x86_64" == platform):
+      replaceInFile(file, "_x86_64.a", ".a")
+      replaceInFile(file, "_x86_64.so", ".so")
+    if ("android_x86" == platform):
+      replaceInFile(file, "_x86.a", ".a")
+      replaceInFile(file, "_x86.so", ".so")
+  return
+
 def qt_config_platform_addon(platform):
   config_addon = ""
   if (0 == platform.find("win")):
@@ -721,8 +781,9 @@ def qt_config(platform):
   if (-1 != platform.find("xp")):
     config_param += " build_xp"
   if ("ios" == platform):
-    set_env("BITCODE_GENERATION_MODE", "bitcode")
-    set_env("ENABLE_BITCODE", "YES")
+    if (config.check_option("bitcode", "yes")):
+      set_env("BITCODE_GENERATION_MODE", "bitcode")
+      set_env("ENABLE_BITCODE", "YES")
     config_param = config_param.replace("desktop", "")
     config_param += " iphoneos device"
     if (-1 == config_param_lower.find("debug")):
@@ -752,6 +813,21 @@ def qt_config(platform):
 def qt_major_version():
   qt_dir = qt_version()
   return qt_dir.split(".")[0]
+
+def qt_version_decimal():
+  qt_dir = qt_version()
+  return 10 * int(qt_dir.split(".")[0]) + int(qt_dir.split(".")[1])
+
+def qt_config_as_param(value):
+  qt_version = qt_version_decimal()
+  ret_params = []
+  if (66 > qt_version):
+    ret_params.append("CONFIG+=" + value)
+  else:
+    params = value.split()
+    for name in params:
+      ret_params.append("CONFIG+=" + name)
+  return ret_params
 
 def qt_copy_lib(lib, dir):
   qt_dir = get_env("QT_DEPLOY")
@@ -1014,15 +1090,15 @@ def web_apps_addons_param():
 def download(url, dst):
   return cmd_exe("curl", ["-L", "-o", dst, url])
 
-def extract(src, dst):
+def extract(src, dst, is_no_errors=False):
   app = "7za" if ("mac" == host_platform()) else "7z"
-  return cmd_exe(app, ["x", "-y", src, "-o" + dst])
+  return cmd_exe(app, ["x", "-y", src, "-o" + dst], is_no_errors)
 
-def extract_unicode(src, dst):
+def extract_unicode(src, dst, is_no_errors=False):
   if "windows" == host_platform():
     run_as_bat_win_isolate([u"chcp 65001", u"call 7z.exe x -y \"" + src + u"\" \"-o" + dst + u"\"", u"exit"])
     return
-  return extract(src, dst)
+  return extract(src, dst, is_no_errors)
 
 def archive_folder(src, dst):
   app = "7za" if ("mac" == host_platform()) else "7z"
@@ -1155,7 +1231,7 @@ def mac_correct_rpath_x2t(dir):
   mac_correct_rpath_library("kernel", ["UnicodeConverter"])
   mac_correct_rpath_library("kernel_network", ["UnicodeConverter", "kernel"])
   mac_correct_rpath_library("graphics", ["UnicodeConverter", "kernel"])
-  mac_correct_rpath_library("doctrenderer", ["UnicodeConverter", "kernel", "kernel_network", "graphics"])
+  mac_correct_rpath_library("doctrenderer", ["UnicodeConverter", "kernel", "kernel_network", "graphics", "PdfFile", "XpsFile", "DjVuFile", "DocxRenderer"])
   mac_correct_rpath_library("HtmlFile2", ["UnicodeConverter", "kernel", "kernel_network", "graphics"])
   mac_correct_rpath_library("EpubFile", ["UnicodeConverter", "kernel", "HtmlFile2", "graphics"])
   mac_correct_rpath_library("Fb2File", ["UnicodeConverter", "kernel", "graphics"])
@@ -1174,7 +1250,7 @@ def mac_correct_rpath_x2t(dir):
   if is_file("./allthemesgen"):
     cmd("chmod", ["-v", "+x", "./allthemesgen"])
     cmd("install_name_tool", ["-add_rpath", "@executable_path", "./allthemesgen"], True)
-    mac_correct_rpath_binary("./allthemesgen", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "graphics", "kernel_network", "doctrenderer"])
+    mac_correct_rpath_binary("./allthemesgen", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "graphics", "kernel_network", "doctrenderer", "PdfFile", "XpsFile", "DjVuFile", "DocxRenderer"])
   if is_file("./pluginsmanager"):
     cmd("chmod", ["-v", "+x", "./pluginsmanager"])
     cmd("install_name_tool", ["-add_rpath", "@executable_path", "./pluginsmanager"], True)
@@ -1192,6 +1268,13 @@ def mac_correct_rpath_docbuilder(dir):
   cmd("chmod", ["-v", "+x", "./docbuilder"])
   cmd("install_name_tool", ["-add_rpath", "@executable_path", "./docbuilder"], True)
   mac_correct_rpath_binary("./docbuilder", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "kernel_network", "graphics", "PdfFile", "HtmlRenderer", "XpsFile", "DjVuFile", "HtmlFile2", "Fb2File", "EpubFile", "doctrenderer", "DocxRenderer"])  
+  mac_correct_rpath_library("docbuilder.c", ["icudata.58", "icuuc.58", "UnicodeConverter", "kernel", "kernel_network", "graphics", "doctrenderer", "PdfFile", "XpsFile", "DjVuFile", "DocxRenderer"])
+
+  def add_loader_path_to_rpath(libs):
+    for lib in libs:
+      cmd("install_name_tool", ["-add_rpath", "@loader_path", "lib" + lib + ".dylib"], True)
+
+  add_loader_path_to_rpath(["icuuc.58", "UnicodeConverter", "kernel", "kernel_network", "graphics", "doctrenderer", "PdfFile", "XpsFile", "DjVuFile", "DocxRenderer", "docbuilder.c"])
   os.chdir(cur_dir)
   return
 
@@ -1225,6 +1308,19 @@ def mac_correct_rpath_desktop(dir):
   replaceInFile("./editors_helper (Renderer).app/Contents/Info.plist", "<string>editors_helper</string>", "<string>editors_helper (Renderer)</string>")
   replaceInFile("./editors_helper (Renderer).app/Contents/Info.plist", "<string>asc.onlyoffice.editors-helper</string>", "<string>asc.onlyoffice.editors-helper-renderer</string>")
   os.chdir(cur_dir)
+  return
+
+def linux_set_origin_rpath_libraries(dir, libs):
+  tools_dir = get_script_dir() + "/../tools/linux/elf/"
+  cur_dir = os.getcwd()
+  os.chdir(dir)
+  for lib in libs:
+    cmd(tools_dir + "patchelf", ["--set-rpath", "\\$ORIGIN", "lib" + lib], True)
+  os.chdir(cur_dir)
+  return
+
+def linux_correct_rpath_docbuilder(dir):
+  linux_set_origin_rpath_libraries(dir, ["docbuilder.jni.so", "docbuilder.c.so", "icuuc.so.58", "doctrenderer.so", "graphics.so", "kernel.so", "kernel_network.so", "UnicodeConverter.so", "PdfFile.so", "XpsFile.so", "DjVuFile.so", "DocxRenderer.so"])
   return
 
 def common_check_version(name, good_version, clean_func):
@@ -1280,7 +1376,7 @@ def copy_marketplace_plugin(dst_dir, is_name_as_guid=False, is_desktop_local=Fal
   git_dir = __file__script__path__ + "/../.."
   if False:
     # old version
-    base.copy_sdkjs_plugin(git_dir + "/desktop-sdk/ChromiumBasedEditors/plugins", dst_dir, "manager", is_name_as_guid, is_desktop_local)
+    copy_sdkjs_plugin(git_dir + "/desktop-sdk/ChromiumBasedEditors/plugins", dst_dir, "manager", is_name_as_guid, is_desktop_local)
     return
   src_dir_path = git_dir + "/onlyoffice.github.io/store/plugin"
   name = "marketplace"
@@ -1303,9 +1399,11 @@ def copy_marketplace_plugin(dst_dir, is_name_as_guid=False, is_desktop_local=Fal
     delete_dir(dst_dir_path + "/store/plugin-dev")
   return
 
-def copy_sdkjs_plugins(dst_dir, is_name_as_guid=False, is_desktop_local=False):
+def copy_sdkjs_plugins(dst_dir, is_name_as_guid=False, is_desktop_local=False, isXp=False):
   plugins_dir = __file__script__path__ + "/../../onlyoffice.github.io/sdkjs-plugins/content"
   plugins_list_config = config.option("sdkjs-plugin")
+  if isXp:
+    plugins_list_config="photoeditor, macros, highlightcode, doc2md"
   if ("" == plugins_list_config):
     return
   plugins_list = plugins_list_config.rsplit(", ")
@@ -1344,6 +1442,7 @@ def support_old_versions_plugins(out_dir):
 def generate_sdkjs_plugin_list(dst):
   plugins_list = config.option("sdkjs-plugin").rsplit(", ") \
                + config.option("sdkjs-plugin-server").rsplit(", ")
+  plugins_list = list(filter(None, plugins_list))
   with open(get_path(dst), 'w') as file:
     dump = json.dumps(sorted(plugins_list), indent=4)
     file.write(re.sub(r"^(\s{4})", '\t', dump, 0, re.MULTILINE))
@@ -1661,3 +1760,92 @@ def copy_dictionaries(src, dst, is_hyphen = True, is_spell = True):
     delete_file(dst + "/uk_UA/th_uk_UA.idx")
 
   return
+
+def check_module_version(actual_version, clear_func):
+  module_file = "./module.version"
+  current_module_version = readFile(module_file)
+  if (actual_version == current_module_version):
+    return
+  if is_file(module_file):
+    delete_file(module_file)
+  writeFile(module_file, actual_version)
+  clear_func()
+  return
+
+def check_python():
+  if ("linux" != host_platform()):
+    return
+  directory = __file__script__path__ + "/../tools/linux"
+  directory_bin = __file__script__path__ + "/../tools/linux/python3/bin"
+
+  if not is_dir(directory + "/python3"):
+    cmd("tar", ["xfz", directory + "/python3.tar.gz", "-C", directory])
+    cmd("ln", ["-s", directory_bin + "/python3", directory_bin + "/python"])
+  directory_bin = directory_bin.replace(" ", "\\ ")
+  os.environ["PATH"] = directory_bin + os.pathsep + os.environ["PATH"]
+  return
+
+def check_tools():
+  if ("linux" == host_platform()):
+    directory = __file__script__path__ + "/../tools/linux"
+    if not is_os_arm() and config.check_option("platform", "linux_arm64"):
+      if not is_dir(directory + "/qt"):
+        create_dir(directory + "/qt")
+      cmd("python", [directory + "/arm/build_qt.py", "--arch", "arm64", directory + "/qt/arm64"])
+  return
+
+def apply_patch(file, patch):
+  patch_content = readFile(patch)
+  index1 = patch_content.find("<<<<<<<")
+  index2 = patch_content.find("=======")
+  index3 = patch_content.find(">>>>>>>")
+  file_content_old = patch_content[index1 + 7:index2].strip()
+  file_content_new = patch_content[index2 + 7:index3].strip()
+  #file_content_new = "\n#if 0" + file_content_old + "#else" + file_content_new + "#endif\n"
+  replaceInFile(file, file_content_old, file_content_new)
+  return
+
+def get_autobuild_version(product, platform="", branch="", build=""):
+  download_platform = platform
+  if ("" == download_platform):
+    osType = get_platform()
+    isArm = True if (-1 != osType.find("arm")) else False
+    is64 = True if (osType.endswith("64")) else False
+    
+    if ("windows" == host_platform()):
+      download_platform = "win-"
+    elif ("linux" == host_platform()):
+      download_platform = "linux-"
+    else:
+      download_platform = "mac-"
+
+    download_platform += ("arm" if isArm else "")
+    download_platform += ("64" if is64 else "32")
+  else:
+    download_platform = download_platform.replace("_", "-")
+
+  download_build = build
+  if ("" == download_build):
+    download_build = "latest"
+
+  download_branch = branch
+  if ("" == download_branch):
+    download_branch = "develop"
+
+  download_addon = download_branch + "/" + download_build + "/" + product + "-" + download_platform + ".7z"
+  return "http://repo-doc-onlyoffice-com.s3.amazonaws.com/archive/" + download_addon
+
+def create_x2t_js_cache(dir, product):
+  if is_file(dir + "/libdoctrenderer.dylib") and (os.path.getsize(dir + "/libdoctrenderer.dylib") < 5*1024*1024):
+    return
+
+  if (product in ["builder", "server"]):
+    cmd_in_dir(dir, "./x2t", ["-create-js-cache"], True)
+  cmd_in_dir(dir, "./x2t", ["-create-js-snapshots"], True)
+  return
+
+def setup_local_qmake(dir_qmake):
+  dir_base = os.path.dirname(dir_qmake)
+  writeFile(dir_base + "/onlyoffice_qt.conf", "Prefix = " + dir_base)  
+  return
+  

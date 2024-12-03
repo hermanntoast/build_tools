@@ -5,6 +5,7 @@ import base
 
 import re
 import shutil
+import glob
 from tempfile import mkstemp
 
 def make():
@@ -40,23 +41,22 @@ def make():
 
     build_server_dir = root_dir + '/server'
     server_dir = base.get_script_dir() + "/../../server"
-    bin_server_dir = server_dir + "/build/server"
 
     base.create_dir(build_server_dir + '/DocService')
 
-    base.copy_dir(bin_server_dir + '/Common/config', build_server_dir + '/Common/config')
+    base.copy_dir(server_dir + '/Common/config', build_server_dir + '/Common/config')
 
     base.create_dir(build_server_dir + '/DocService')
-    base.copy_exe(bin_server_dir + "/DocService", build_server_dir + '/DocService', "docservice")
+    base.copy_exe(server_dir + "/DocService", build_server_dir + '/DocService', "docservice")
 
     base.create_dir(build_server_dir + '/FileConverter')
-    base.copy_exe(bin_server_dir + "/FileConverter", build_server_dir + '/FileConverter', "converter")
+    base.copy_exe(server_dir + "/FileConverter", build_server_dir + '/FileConverter', "converter")
 
     base.create_dir(build_server_dir + '/Metrics')
-    base.copy_exe(bin_server_dir + "/Metrics", build_server_dir + '/Metrics', "metrics")
-    base.copy_dir(bin_server_dir + '/Metrics/config', build_server_dir + '/Metrics/config')
+    base.copy_exe(server_dir + "/Metrics", build_server_dir + '/Metrics', "metrics")
+    base.copy_dir(server_dir + '/Metrics/config', build_server_dir + '/Metrics/config')
     base.create_dir(build_server_dir + '/Metrics/node_modules/modern-syslog/build/Release')
-    base.copy_file(bin_server_dir + "/Metrics/node_modules/modern-syslog/build/Release/core.node", build_server_dir + "/Metrics/node_modules/modern-syslog/build/Release/core.node")
+    base.copy_file(server_dir + "/Metrics/node_modules/modern-syslog/build/Release/core.node", build_server_dir + "/Metrics/node_modules/modern-syslog/build/Release/core.node")
 
     qt_dir = base.qt_setup(native_platform)
     platform = native_platform
@@ -114,6 +114,11 @@ def make():
     js_dir = root_dir
     base.copy_dir(base_dir + "/js/" + branding + "/builder/sdkjs", js_dir + "/sdkjs")
     base.copy_dir(base_dir + "/js/" + branding + "/builder/web-apps", js_dir + "/web-apps")
+    for file in glob.glob(js_dir + "/web-apps/apps/*/*/*.js.map") \
+              + glob.glob(js_dir + "/web-apps/apps/*/mobile/dist/js/*.js.map"):
+      base.delete_file(file)
+
+    base.create_x2t_js_cache(converter_dir, "server")
 
     # add embed worker code
     base.cmd_in_dir(git_dir + "/sdkjs/common/embed", "python", ["make.py", js_dir + "/web-apps/apps/api/documents/api.js"])
@@ -204,15 +209,15 @@ def make():
         base.delete_dir(root_dir_snap)
       base.create_dir(root_dir_snap)
       base.copy_dir(root_dir, root_dir_snap)
-      base.copy_dir(bin_server_dir + '/DocService/node_modules', root_dir_snap + '/server/DocService/node_modules')
-      base.copy_dir(bin_server_dir + '/DocService/sources', root_dir_snap + '/server/DocService/sources')
-      base.copy_dir(bin_server_dir + '/DocService/public', root_dir_snap + '/server/DocService/public')
+      base.copy_dir(server_dir + '/DocService/node_modules', root_dir_snap + '/server/DocService/node_modules')
+      base.copy_dir(server_dir + '/DocService/sources', root_dir_snap + '/server/DocService/sources')
+      base.copy_dir(server_dir + '/DocService/public', root_dir_snap + '/server/DocService/public')
       base.delete_file(root_dir_snap + '/server/DocService/docservice')
-      base.copy_dir(bin_server_dir + '/FileConverter/node_modules', root_dir_snap + '/server/FileConverter/node_modules')
-      base.copy_dir(bin_server_dir + '/FileConverter/sources', root_dir_snap + '/server/FileConverter/sources')
+      base.copy_dir(server_dir + '/FileConverter/node_modules', root_dir_snap + '/server/FileConverter/node_modules')
+      base.copy_dir(server_dir + '/FileConverter/sources', root_dir_snap + '/server/FileConverter/sources')
       base.delete_file(root_dir_snap + '/server/FileConverter/converter')
-      base.copy_dir(bin_server_dir + '/Common/node_modules', root_dir_snap + '/server/Common/node_modules')
-      base.copy_dir(bin_server_dir + '/Common/sources', root_dir_snap + '/server/Common/sources')
+      base.copy_dir(server_dir + '/Common/node_modules', root_dir_snap + '/server/Common/node_modules')
+      base.copy_dir(server_dir + '/Common/sources', root_dir_snap + '/server/Common/sources')
       if (base.is_dir(root_dir_snap_example)):
         base.delete_dir(root_dir_snap_example)
       base.create_dir(root_dir_snap_example)

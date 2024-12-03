@@ -39,9 +39,14 @@ def install_deps():
               "libxi-dev",
               "libxrender-dev",
               "libxss1",
-              "libncurses5"]
+              "libncurses5",
+              "libncurses6",
+              "curl",
+              "libxkbcommon0",
+              "libxkbcommon-x11-0"]
 
-  base.cmd("sudo", ["apt-get", "install", "-y"] + packages)
+  for package in packages:
+    base.cmd("sudo", ["apt-get", "install", "-y", package], True)
 
   # nodejs
   base.cmd("sudo", ["apt-get", "install", "-y", "nodejs"])
@@ -54,17 +59,10 @@ def install_deps():
     print("Installed Node.js version: " + str(nodejs_cur_version_major) + "." + str(nodejs_cur_version_minor))
   except:
     nodejs_cur = 1
-  if (nodejs_cur < 14000):
-    print("Node.js version cannot be less 14")
+  if (nodejs_cur < 16000):
+    print("Node.js version cannot be less 16")
     print("Reinstall")
-    if (base.is_dir("./node_js_setup_14.x")):
-      base.delete_dir("./node_js_setup_14.x")
-    base.cmd("sudo", ["apt-get", "remove", "--purge", "-y", "nodejs"])
-    base.download("https://deb.nodesource.com/setup_14.x", "./node_js_setup_14.x")
-    base.cmd('curl -fsSL https://deb.nodesource.com/gpgkey/nodesource.gpg.key | sudo apt-key add -')
-    base.cmd("sudo", ["bash", "./node_js_setup_14.x"])
-    base.cmd("sudo", ["apt-get", "install", "-y", "nodejs"])
-    base.cmd("sudo", ["npm", "install", "-g", "npm@6"])
+    base.run_as_bat(["curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash - &&sudo apt-get install -y nodejs"])    
   else:
     print("OK")
     base.cmd("sudo", ["apt-get", "-y", "install", "npm", "yarn"], True)
@@ -86,4 +84,3 @@ def install_deps():
 
 if __name__ == "__main__":
   install_deps()
-

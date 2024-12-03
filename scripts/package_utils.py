@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 import package_common as common
-import base
 
 def host_platform():
   return platform.system().lower()
@@ -72,6 +71,9 @@ def get_path(path):
   if is_windows():
     return path.replace("/", "\\")
   return path
+
+def get_relpath(path, rel_path):
+  return os.path.relpath(get_path(path), get_path(rel_path))
 
 def get_abspath(path):
   return os.path.abspath(get_path(path))
@@ -199,13 +201,12 @@ def copy_files(src, dst, override=True, verbose=True):
       copy_files(file + "/*", dst + "/" + file_name, override)
   return
 
-def copy_dir(src, dst, override=True, verbose=True):
+def copy_dir(src, dst, verbose=True):
   if verbose:
     log("- copy_dir:")
     log("    src: " + src)
     log("    dst: " + dst)
-    log("    override: " + str(override))
-  base.copy_dir(src, dst)
+  shutil.copytree(src, dst)
   return
 
 def copy_dir_content(src, dst, filter_include = "", filter_exclude = "", verbose=True):
@@ -215,20 +216,18 @@ def copy_dir_content(src, dst, filter_include = "", filter_exclude = "", verbose
     log("    dst: " + dst)
     log("    include: " + filter_include)
     log("    exclude: " + filter_exclude)
-  src_folder = src
-  if ("/" != src[-1:]):
-    src_folder += "/"
-  src_folder += "*"
-  for file in glob.glob(src_folder):
-    basename = os.path.basename(file)
-    if ("" != filter_include) and (-1 == basename.find(filter_include)):
+  for item in os.listdir(src):
+    s = os.path.join(src, item)
+    d = os.path.join(dst, item)
+    if ("" != filter_include) and (-1 == item.find(filter_include)):
       continue
-    if ("" != filter_exclude) and (-1 != basename.find(filter_exclude)):
+    if ("" != filter_exclude) and (-1 != item.find(filter_exclude)):
       continue
-    if is_file(file):
-      copy_file(file, dst, verbose=False)
-    elif is_dir(file):
-      copy_dir(file, dst + "/" + basename, verbose=False)
+    if os.path.isdir(s):
+      shutil.copytree(s, d)
+    else:
+      shutil.copy2(s, d)
+    log(item)
   return
 
 def delete_file(path, verbose=True):
@@ -265,11 +264,6 @@ def delete_files(src, verbose=True):
 
 def set_summary(target, status):
   common.summary.append({target: status})
-  return
-
-def add_deploy_data(key):
-  with open(common.deploy_data, 'a+') as f:
-    f.write(key + "\n")
   return
 
 def cmd(*args, **kwargs):
@@ -323,31 +317,9 @@ def ps1(file, args=[], **kwargs):
   if kwargs.get("creates") and is_exist(kwargs["creates"]):
     return True
   ret = subprocess.call(
-      ["powershell", "-File", file] + args, stderr=subprocess.STDOUT, shell=True
+    ["powershell", "-ExecutionPolicy", "ByPass", "-File", file] + args,
+    stderr=subprocess.STDOUT, shell=True
   ) == 0
-  return ret
-
-def download_file(url, path, md5, verbose=False):
-  if verbose:
-    log("- download_file:")
-    log("    url: " + path)
-    log("    path: " + url)
-    log("    md5: " + md5)
-  if is_file(path):
-    if get_hash_md5(path) == md5:
-      log_err("file already exist (match checksum)")
-      return True
-    else:
-      log_err("wrong checksum (%s), delete" % md5)
-      os.remove(path)
-  ret = powershell(
-      "(New-Object System.Net.WebClient).DownloadFile('%s','%s')" % (url, path),
-      verbose=True
-  )
-  md5_new = get_hash_md5(path)
-  if md5 != md5_new:
-    log_err("checksum didn't match (%s != %s)" % (md5, md5_new))
-    return False
   return ret
 
 def sh(command, **kwargs):
@@ -408,15 +380,13 @@ def s3_upload(src, dst, **kwargs):
     ret = sh(" ".join(args), verbose=True)
   return ret
 
-def s3_sync(src, dst, **kwargs):
+def s3_copy(src, dst, **kwargs):
   args = ["aws"]
   if kwargs.get("endpoint_url"):
     args += ["--endpoint-url", kwargs["endpoint_url"]]
-  args += ["s3", "sync", "--no-progress"]
+  args += ["s3", "cp", "--no-progress"]
   if kwargs.get("acl"):
     args += ["--acl", kwargs["acl"]]
-  if kwargs.get("delete") and kwargs["delete"]:
-    args += ["--delete"]
   args += [src, dst]
   if is_windows():
     ret = cmd(*args, verbose=True)

@@ -102,11 +102,18 @@ def make():
 
     base.generate_doctrenderer_config(root_dir + "/converter/DoctRenderer.config", "../editors/", "desktop", "", "../dictionaries")
     base.copy_dir(git_dir + "/document-templates/new", root_dir + "/converter/empty")
+    base.copy_dir(git_dir + "/desktop-apps/common/templates", root_dir + "/converter/templates")
 
     # dictionaries
     base.copy_dictionaries(git_dir + "/dictionaries", root_dir + "/dictionaries")
 
-    base.copy_dir(git_dir + "/desktop-apps/common/package/fonts", root_dir + "/fonts")
+    base.copy_dir(git_dir  + "/core-fonts/opensans",   root_dir + "/fonts")
+    base.copy_dir(git_dir  + "/core-fonts/asana",      root_dir + "/fonts/asana")
+    base.copy_dir(git_dir  + "/core-fonts/caladea",    root_dir + "/fonts/caladea")
+    base.copy_dir(git_dir  + "/core-fonts/crosextra",  root_dir + "/fonts/crosextra")
+    base.copy_dir(git_dir  + "/core-fonts/openoffice", root_dir + "/fonts/openoffice")
+    base.copy_file(git_dir + "/core-fonts/ASC.ttf",    root_dir + "/fonts/ASC.ttf")
+
     base.copy_file(git_dir + "/desktop-apps/common/package/license/3dparty/3DPARTYLICENSE", root_dir + "/3DPARTYLICENSE")
   
     # cef
@@ -207,12 +214,17 @@ def make():
 
     base.create_dir(root_dir + "/editors")
     base.copy_dir(base_dir + "/js/" + branding + "/desktop/sdkjs", root_dir + "/editors/sdkjs")
+    if len(os.listdir(root_dir + "/editors/sdkjs")) == 0:
+      base.delete_dir(root_dir + "/editors/sdkjs") # delete empty folder. for bug 62528
     base.copy_dir(base_dir + "/js/" + branding + "/desktop/web-apps", root_dir + "/editors/web-apps")
+    for file in glob.glob(root_dir + "/editors/web-apps/apps/*/*/*.js.map"):
+      base.delete_file(file)
     base.copy_dir(git_dir + "/desktop-sdk/ChromiumBasedEditors/resources/local", root_dir + "/editors/sdkjs/common/Images/local")
 
     base.create_dir(root_dir + "/editors/sdkjs-plugins")
-    base.copy_marketplace_plugin(root_dir + "/editors/sdkjs-plugins", True, True, True)
-    base.copy_sdkjs_plugins(root_dir + "/editors/sdkjs-plugins", True, True)
+    if not isWindowsXP:
+      base.copy_marketplace_plugin(root_dir + "/editors/sdkjs-plugins", True, True, True)
+    base.copy_sdkjs_plugins(root_dir + "/editors/sdkjs-plugins", True, True, isWindowsXP)
     # remove some default plugins
     if base.is_dir(root_dir + "/editors/sdkjs-plugins/speech"):
       base.delete_dir(root_dir + "/editors/sdkjs-plugins/speech")
@@ -230,6 +242,8 @@ def make():
     base.copy_sdkjs_plugin(git_dir + "/desktop-sdk/ChromiumBasedEditors/plugins", root_dir + "/editors/sdkjs-plugins", "sendto", True)
   
     base.copy_file(base_dir + "/js/" + branding + "/desktop/index.html", root_dir + "/index.html")
+    base.create_dir(root_dir + "/editors/webext")
+    base.copy_file(base_dir + "/js/" + branding + "/desktop/noconnect.html", root_dir + "/editors/webext/noconnect.html")
 
     if isWindowsXP:
       base.create_dir(root_dir + "/providers")
@@ -246,6 +260,8 @@ def make():
 
     if isUseJSC:
       base.delete_file(root_dir + "/converter/icudtl.dat")
+
+    base.create_x2t_js_cache(root_dir + "/converter", "desktop")
 
     if (0 == platform.find("win")):
       base.delete_file(root_dir + "/cef_sandbox.lib")

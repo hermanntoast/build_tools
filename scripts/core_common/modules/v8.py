@@ -93,6 +93,7 @@ def make():
 
   if not base.is_dir("depot_tools"):
     base.cmd("git", ["clone", "https://chromium.googlesource.com/chromium/tools/depot_tools.git"])
+    v8_89.change_bootstrap()
     if ("windows" == base.host_platform()):
       # hack for 32 bit system!!!
       if base.is_file("depot_tools/cipd.ps1"):
@@ -118,7 +119,7 @@ def make():
     # windows hack (delete later) ----------------------
     if ("windows" == base.host_platform()):
       base.delete_dir_with_access_error("v8/buildtools/win")
-      base.cmd("git", ["config", "--system", "core.longpaths", "true"])
+      base.cmd("git", ["config", "--system", "core.longpaths", "true"], True)
       base.cmd("gclient", ["sync", "--force"], True)
     else:
       base.cmd("gclient", ["sync"], True) 
@@ -225,13 +226,17 @@ def make_xp():
 
   if not base.is_dir("depot_tools"):
     base.cmd("git", ["clone", "https://chromium.googlesource.com/chromium/tools/depot_tools.git"])
+    v8_89.change_bootstrap()
     if ("windows" == base.host_platform()):
       # hack for 32 bit system!!!
       if base.is_file("depot_tools/cipd.ps1"):
         base.replaceInFile("depot_tools/cipd.ps1", "windows-386", "windows-amd64")
   
+  # old variant
+  #path_to_python2 = "/depot_tools/win_tools-2_7_13_chromium7_bin/python/bin"
+  path_to_python2 = "/depot_tools/bootstrap-2@3_8_10_chromium_23_bin/python/bin"
   os.environ["PATH"] = os.pathsep.join([base_dir + "/depot_tools", 
-    base_dir + "/depot_tools/win_tools-2_7_13_chromium7_bin/python/bin", 
+    base_dir + path_to_python2, 
     config.option("vs-path") + "/../Common7/IDE",
     os.environ["PATH"]])
 
@@ -241,7 +246,7 @@ def make_xp():
     base.cmd("./depot_tools/fetch", ["v8"], True)
     base.cmd("./depot_tools/gclient", ["sync", "-r", "4.10.253"], True)
     base.delete_dir_with_access_error("v8/buildtools/win")
-    base.cmd("git", ["config", "--system", "core.longpaths", "true"])
+    base.cmd("git", ["config", "--system", "core.longpaths", "true"], True)
     base.cmd("gclient", ["sync", "--force"], True)
 
   # save common py script
@@ -265,6 +270,13 @@ def make_xp():
     "  replaceInFile(file, '<RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>')",
     "  replaceInFile(file, '<RuntimeLibrary>MultiThreaded</RuntimeLibrary>', '<RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>')",
     ]);
+
+  programFilesDir = base.get_env("ProgramFiles")
+  if ("" != base.get_env("ProgramFiles(x86)")):
+    programFilesDir = base.get_env("ProgramFiles(x86)")
+  dev_path = programFilesDir + "\\Microsoft Visual Studio 14.0\\Common7\\IDE"
+  if (base.is_dir(dev_path)):
+    os.environ["PATH"] = dev_path + os.pathsep + os.environ["PATH"]
 
   # add "SET CL=\"/D_ITERATOR_DEBUG_LEVEL=0\"" before devenv for disable _ITERATOR_DEBUG_LEVEL in debug
   if config.check_option("platform", "win_64_xp"):
