@@ -1,6 +1,6 @@
-ARG product_version=7.5.0
+ARG product_version=8.2.2
 
-FROM ubuntu:16.04 as build-stage
+FROM ubuntu:22.04 as build-stage
 
 ENV TZ=Etc/UTC
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
